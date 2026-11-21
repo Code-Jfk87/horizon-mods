@@ -10,6 +10,10 @@ publish = false
 horizon-mod-api = { path = ".horizon/sdk/api/crates/horizon-mod-api" }
 serde_json = "1"
 
+[dev-dependencies]
+# The SDK's fakes, for the recipe conversion's test.
+horizon-mod-api = { path = ".horizon/sdk/api/crates/horizon-mod-api", features = ["testing"] }
+
 # The SDK build this mod is made for: `cargo horizon-mod update` moves it.
 [package.metadata.horizon]
 sdk = "0a875da91dbb0fdcb7ba8c42c11341aa229af51a"

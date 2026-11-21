@@ -774,6 +774,102 @@ mod tests {
         })
     }
 
+    /// Items the fake game has, by key and id, and a stack of one of them.
+    fn fake_items(ids: &[&str]) -> (HashMap<String, u32>, HashMap<ItemKey, u32>, Vec<ItemKey>) {
+        let mut host = mod_api::testing::FakeHost::new();
+        let names: Vec<_> = ids
+            .iter()
+            .map(|id| mod_api::Identifier::parse(id).unwrap())
+            .collect();
+        host.registries.resolve_items(names.clone()).unwrap();
+        let keys: Vec<ItemKey> = (names.iter())
+            .map(|id| mod_api::prelude::ItemsHost::item_key(&host, id).unwrap())
+            .collect();
+        let by_id = (ids.iter().enumerate())
+            .map(|(n, id)| (id.to_string(), n as u32))
+            .collect();
+        let by_key = (keys.iter().enumerate())
+            .map(|(n, &k)| (k, n as u32))
+            .collect();
+        (by_id, by_key, keys)
+    }
+
+    #[test]
+    fn shaped_shapeless_cooking_and_stonecutting_recipes_get_their_layouts() {
+        let ids = [
+            "minecraft:oak_planks",
+            "minecraft:stick",
+            "minecraft:stone",
+            "minecraft:charcoal",
+        ];
+        let (by_id, by_key, keys) = fake_items(&ids);
+        let items = Lookup {
+            by_id: &by_id,
+            by_key: &by_key,
+        };
+        let of = |id: &str| Ingredient::of(vec![id.into()]);
+        let stack = |n: usize, count| ItemStack::new(keys[n], count).unwrap();
+        let mut sticks = mod_api::Recipe::new(
+            "minecraft:stick",
+            "minecraft:crafting",
+            Arc::new(
+                serde_json::json!({"type": "minecraft:crafting_shaped", "pattern": ["# ", " #"]}),
+            ),
+        );
+        sticks.ingredients = vec![of(ids[0]), of(ids[0])];
+        sticks.results = vec![stack(1, 4)];
+        let r = convert(&sticks, Station::Crafting, &items).unwrap();
+        assert_eq!(
+            (r.layout, r.width, r.height, r.note),
+            (Layout::Grid, 2, 2, Note::None)
+        );
+        assert_eq!(r.slots, [vec![0], vec![], vec![], vec![0]]);
+        assert_eq!(r.result, [viewer::Stack { item: 1, count: 4 }]);
+        // Without a pattern, the ingredients fill a small grid.
+        sticks.json = Arc::new(serde_json::json!({"type": "minecraft:crafting_shapeless"}));
+        let r = convert(&sticks, Station::Crafting, &items).unwrap();
+        assert_eq!((r.width, r.height, r.note), (2, 1, Note::Shapeless));
+        assert_eq!(r.slots, [vec![0], vec![0]]);
+        let mut charcoal = mod_api::Recipe::new(
+            "minecraft:charcoal",
+            "minecraft:smelting",
+            Arc::new(serde_json::json!({})),
+        );
+        charcoal.ingredients = vec![of(ids[0])];
+        charcoal.results = vec![stack(3, 1)];
+        (charcoal.cooking_time, charcoal.experience) = (Some(200), Some(0.15));
+        let r = convert(&charcoal, Station::Furnace, &items).unwrap();
+        assert_eq!(
+            (r.layout, r.slots.as_slice()),
+            (Layout::Cooking, &[vec![0]][..])
+        );
+        assert_eq!(
+            r.note,
+            Note::Cooking {
+                ticks: 200,
+                experience: 0.15
+            }
+        );
+        let mut cut = mod_api::Recipe::new(
+            "minecraft:stone_from_stick",
+            "minecraft:stonecutting",
+            Arc::new(serde_json::json!({})),
+        );
+        cut.rule = Some(RecipeRule::Stonecutting {
+            input: of(ids[1]),
+            result: stack(2, 2),
+        });
+        let r = convert(&cut, Station::Stonecutter, &items).unwrap();
+        assert_eq!(
+            (r.layout, r.slots.as_slice()),
+            (Layout::Single, &[vec![1]][..])
+        );
+        assert_eq!(r.result, [viewer::Stack { item: 2, count: 2 }]);
+        // A pattern its ingredients don't fill is not shown.
+        sticks.json = Arc::new(serde_json::json!({"pattern": ["###"]}));
+        assert_eq!(convert(&sticks, Station::Crafting, &items), None);
+    }
+
     #[test]
     fn a_recipe_making_nothing_known_and_a_special_one_get_no_page() {
         let ids = ["minecraft:oak_log", "minecraft:oak_planks"];
