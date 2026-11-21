@@ -10,7 +10,7 @@ items": a click on an item in the panel gives you one, and a right click a stack
 ## Install
 
 In the Horizon launcher: **Mods**, find Recipes, **Install**. It is a WebAssembly mod, so nothing is built on your
-computer. It needs a game with `RecipesClientHost::panel_recipes` (horizon-rust/horizon#19280), which draws its
+computer. It needs a game with `RecipesClientHost::panel_recipes` (horizon-rust/horizon#19392), which draws its
 recipe pages.
 
 ## Search
