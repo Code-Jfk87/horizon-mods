@@ -29,8 +29,9 @@ Options > Controls under Recipes ("Show recipes", R; "Show uses", U), kept as `k
 ## What it reads
 
 The game's items and their names when a world opens, and the recipes of the stations' types (`recipes_of_type`) the
-first time you use the panel; again when the server sends recipes or tags, or resources reload. Nothing is done per
-frame. On a server, the + and its greying follow the server's recipe book (`known_recipes`, `recipe_book_ids`); the
+first time you use the panel; again when the server sends recipes, and after `/reload` or a resource reload (F3+T, a
+language or a pack) the next time you use the panel, since the game gives no item names while it reloads. Nothing is
+done per frame. On a server, the + and its greying follow the server's recipe book (`known_recipes`, `recipe_book_ids`); the
 recipes shown are the game's own 26.3 ones and the content mods', unless a mod has the server send its types.
 
 ## Build
