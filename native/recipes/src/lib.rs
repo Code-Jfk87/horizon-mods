@@ -8,8 +8,9 @@
 //! `key.recipes.uses` in `horizon-mods.txt`), so a player keeps them.
 //!
 //! The game's items are read once a world is open, its recipes the first time the player uses
-//! the panel, and both again when the world's recipes, tags or resources change; nothing is
-//! done per frame or per tick.
+//! the panel, and both again when the server sends recipes. After new tags (`/reload`) or a
+//! resource reload, which the game runs while it reloads and gives no item names, they are read
+//! again the next time the player uses the panel. Nothing is done per frame or per tick.
 mod viewer;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -429,6 +430,10 @@ struct State {
     /// The panel's search text, kept for the next tables.
     search: String,
     texts: Option<Arc<Texts>>,
+    /// The world's tags or the resources changed while the game was reloading, when it gives
+    /// no item names and takes no panel: the tables are read again the next time the player
+    /// uses the panel.
+    stale: bool,
 }
 
 #[derive(Default)]
@@ -453,8 +458,11 @@ impl Recipes {
 
     /// Reads the world's tables again and shows the items, the search kept; any page goes.
     /// Recipes the panel had read are read again at once, and so is a kept `#tag` search's
-    /// list: its items come from the recipes' tags, and an empty list shown outside a search
-    /// would take the panel, its search box with it, away.
+    /// list, whose items come from the recipes' tags.
+    ///
+    /// The game takes away a panel that shows neither items nor a page, its search box with
+    /// it: the items go first, and only a list with items closes the page. A kept search that
+    /// finds nothing leaves the panel as the game has it, its search box included.
     fn read(&self, host: &mut dyn ClientHost) {
         let (search, recipes_read) = {
             let state = self.state();
@@ -466,10 +474,16 @@ impl Recipes {
             tables.read_recipes(host);
         }
         let items = tables.listed();
-        self.state().tables = Some(tables);
+        {
+            let mut state = self.state();
+            state.tables = Some(tables);
+            state.stale = false;
+        }
         host.panel_style(ID, PanelStyle::Viewer);
-        host.panel_recipes(ID, "", Vec::new(), 0, Vec::new());
-        host.panel_items(ID, items);
+        if !items.is_empty() {
+            host.panel_items(ID, items);
+            host.panel_recipes(ID, "", Vec::new(), 0, Vec::new());
+        }
     }
 
     /// The recipes, read the first time the player uses the panel. The tables are out of the
@@ -497,6 +511,12 @@ impl Recipes {
         if self.state().tables.is_some() {
             self.read(host);
         }
+    }
+
+    /// Marks a world's tables to be read again the next time the player uses the panel.
+    fn read_later(&self) {
+        let mut state = self.state();
+        state.stale = state.tables.is_some();
     }
 
     /// Does what the viewer answered.
@@ -659,6 +679,7 @@ impl Hooks for Recipes {
         let mut state = self.state();
         state.tables = None;
         state.search.clear();
+        state.stale = false;
     }
 
     /// The server sent recipes of its own.
@@ -666,23 +687,26 @@ impl Hooks for Recipes {
         self.read_again(host);
     }
 
-    /// The server sent new tags (after `/reload`).
+    /// The server sent new tags (after `/reload`). This runs while the game reloads, so the
+    /// tables are read again the next time the player uses the panel.
     fn tags_updated(&self, host: HostSide, event: &mut TagsUpdatedEvent) {
-        if let HostSide::Client(host) = host
+        if let HostSide::Client(_) = host
             && matches!(event.cause, TagsUpdateCause::ClientPacketReceived { .. })
         {
-            self.read_again(host);
+            self.read_later();
         }
     }
 
-    /// A resource reload (a new language among them): the names and words change.
+    /// A resource reload (a new language among them): the names and words change. This runs
+    /// while the game reloads, so the tables are read again the next time the player uses the
+    /// panel.
     fn client_resources_reloaded(
         &self,
-        host: &mut dyn ClientHost,
+        _: &mut dyn ClientHost,
         _: &mut ClientResourcesReloadedEvent,
     ) {
         self.state().texts = None;
-        self.read_again(host);
+        self.read_later();
     }
 
     /// The player's search, click or key on this mod's panel.
@@ -690,10 +714,20 @@ impl Hooks for Recipes {
         if event.mod_id != ID || !host.on(ID) {
             return;
         }
-        self.read_recipes_once(host);
+        // A search is taken first, so tables read again keep the text just typed.
         let Some(event) = self.event(host, event.event) else {
             return;
         };
+        let stale = std::mem::take(&mut self.state().stale);
+        if stale {
+            self.read(host);
+            // A click by place in the list, or on a page, aimed at what the panel showed
+            // before: the panel has changed under it.
+            if !matches!(event, Event::Search(_) | Event::Open { .. }) {
+                return;
+            }
+        }
+        self.read_recipes_once(host);
         let give =
             matches!(event, Event::Clicked { .. }) && host.setting_bool("give").unwrap_or(false);
         let Some(out) = self.handle(event.clone(), give) else {
