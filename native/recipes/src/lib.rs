@@ -452,9 +452,19 @@ impl Recipes {
     }
 
     /// Reads the world's tables again and shows the items, the search kept; any page goes.
+    /// Recipes the panel had read are read again at once, and so is a kept `#tag` search's
+    /// list: its items come from the recipes' tags, and an empty list shown outside a search
+    /// would take the panel, its search box with it, away.
     fn read(&self, host: &mut dyn ClientHost) {
-        let search = self.state().search.clone();
-        let tables = Tables::read(host, &search);
+        let (search, recipes_read) = {
+            let state = self.state();
+            let read = state.tables.as_ref().is_some_and(|t| t.recipes_read);
+            (state.search.clone(), read)
+        };
+        let mut tables = Tables::read(host, &search);
+        if recipes_read || search.split_whitespace().any(|w| w.starts_with('#')) {
+            tables.read_recipes(host);
+        }
         let items = tables.listed();
         self.state().tables = Some(tables);
         host.panel_style(ID, PanelStyle::Viewer);
